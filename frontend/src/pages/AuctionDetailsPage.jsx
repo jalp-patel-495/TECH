@@ -14,7 +14,8 @@ import {
   Trophy,
   Zap,
   Radio,
-  Sparkles
+  Sparkles,
+  Heart
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -39,6 +40,33 @@ const AuctionDetailsPage = () => {
 
   // Countdown timer state
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0, isEnded: false });
+  const [isWatchlisted, setIsWatchlisted] = useState(false);
+
+  // Check Watchlist
+  const checkWatchlistStatus = async () => {
+    if (!isAuthenticated) return;
+    try {
+      const res = await api.get(`/watchlist/check/${id}`);
+      if (res.data.success) {
+        setIsWatchlisted(res.data.isWatchlisted);
+      }
+    } catch (e) {}
+  };
+
+  const handleToggleWatchlist = async () => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+    try {
+      const res = await api.post(`/watchlist/${id}`);
+      if (res.data.success) {
+        setIsWatchlisted(res.data.isWatchlisted);
+        setSuccessMsg(res.data.message);
+        setTimeout(() => setSuccessMsg(''), 4000);
+      }
+    } catch (e) {}
+  };
 
   // Fetch auction details
   const fetchAuction = async () => {
@@ -64,7 +92,8 @@ const AuctionDetailsPage = () => {
 
   useEffect(() => {
     fetchAuction();
-  }, [id]);
+    checkWatchlistStatus();
+  }, [id, isAuthenticated]);
 
   // Join Socket.IO auction room for real-time bid events & timer sync
   useEffect(() => {
@@ -559,6 +588,20 @@ const AuctionDetailsPage = () => {
                   >
                     <Gavel className="w-4 h-4" />
                     {biddingLoading ? 'Acquiring Lock & Validating...' : 'Place Official Real-Time Bid'}
+                  </button>
+
+                  {/* Watchlist Toggle Button */}
+                  <button
+                    type="button"
+                    onClick={handleToggleWatchlist}
+                    className={`w-full py-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      isWatchlisted
+                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                    }`}
+                  >
+                    <Heart className={`w-4 h-4 ${isWatchlisted ? 'fill-rose-500 text-rose-500' : ''}`} />
+                    {isWatchlisted ? 'Saved in Watchlist' : 'Add to Watchlist'}
                   </button>
 
                   {!isAuthenticated && (

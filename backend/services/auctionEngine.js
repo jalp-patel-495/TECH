@@ -1,4 +1,10 @@
 const { pool, query } = require('../config/db');
+const {
+  notifyBidPlaced,
+  notifyAuctionExtended,
+  notifyAuctionClosed,
+  sendNotification,
+} = require('./notificationService');
 
 /**
  * Places a bid safely using PostgreSQL transactions and row-level locking (FOR UPDATE)
@@ -40,17 +46,23 @@ const placeBidTransaction = async ({ auctionId, bidderId, amount, io }) => {
     // 2. Reject bids on cancelled or completed auctions
     if (auction.status === 'cancelled') {
       await client.query('ROLLBACK');
-      return { success: false, statusCode: 400, message: 'This auction has been cancelled and cannot accept bids.' };
+      const msg = 'This auction has been cancelled and cannot accept bids.';
+      await query(`INSERT INTO bid_logs (auction_id, bidder_id, amount, status, reason) VALUES ($1, $2, $3, 'rejected', $4)`, [auctionId, bidderId, amount || 0, msg]).catch(() => {});
+      return { success: false, statusCode: 400, message: msg };
     }
 
     if (auction.status === 'completed' || now > endTime) {
       await client.query('ROLLBACK');
-      return { success: false, statusCode: 400, message: 'Auction is officially closed. Bids can no longer be accepted.' };
+      const msg = 'Auction is officially closed. Bids can no longer be accepted.';
+      await query(`INSERT INTO bid_logs (auction_id, bidder_id, amount, status, reason) VALUES ($1, $2, $3, 'rejected', $4)`, [auctionId, bidderId, amount || 0, msg]).catch(() => {});
+      return { success: false, statusCode: 400, message: msg };
     }
 
     if (now < startTime) {
       await client.query('ROLLBACK');
-      return { success: false, statusCode: 400, message: 'This auction has not started yet.' };
+      const msg = 'This auction has not started yet.';
+      await query(`INSERT INTO bid_logs (auction_id, bidder_id, amount, status, reason) VALUES ($1, $2, $3, 'rejected', $4)`, [auctionId, bidderId, amount || 0, msg]).catch(() => {});
+      return { success: false, statusCode: 400, message: msg };
     }
 
     // 3. Strict Bid Validation: Must exceed current highest bid plus minimum increment
@@ -66,15 +78,39 @@ const placeBidTransaction = async ({ auctionId, bidderId, amount, io }) => {
 
     if (bidAmountNum < minRequired) {
       await client.query('ROLLBACK');
+      const msg = `Your bid of $${bidAmountNum.toFixed(2)} is too low. It must be at least $${minRequired.toFixed(2)} (Current Bid: $${currentBid.toFixed(2)} + Increment: $${bidIncrement.toFixed(2)}).`;
+      
+      // Log rejected bid
+      await query(`INSERT INTO bid_logs (auction_id, bidder_id, amount, status, reason) VALUES ($1, $2, $3, 'rejected', $4)`, [auctionId, bidderId, bidAmountNum, msg]).catch(() => {});
+      
+      // Send notification to bidder about rejection
+      sendNotification({
+        userId: bidderId,
+        title: 'Bid Rejected',
+        message: msg,
+        type: 'bid_rejected',
+        link: `/auctions/${auctionId}`,
+        io,
+      }).catch(() => {});
+
       return {
         success: false,
         statusCode: 400,
-        message: `Your bid of $${bidAmountNum.toFixed(2)} is too low. It must be at least $${minRequired.toFixed(2)} (Current Bid: $${currentBid.toFixed(2)} + Increment: $${bidIncrement.toFixed(2)}).`,
+        message: msg,
         minRequired,
         currentBid,
         bidIncrement,
       };
     }
+
+    // Find previous highest bidder before adding new bid
+    const prevBidRes = await client.query(`
+      SELECT bidder_id FROM bids 
+      WHERE auction_id = $1 
+      ORDER BY amount DESC, created_at ASC 
+      LIMIT 1;
+    `, [auctionId]);
+    const previousHighBidderId = prevBidRes.rows[0]?.bidder_id || null;
 
     // 4. Anti-Sniping Rule: If a valid bid arrives in the last 30 seconds, extend auction by 30 seconds
     const secondsRemaining = (endTime.getTime() - now.getTime()) / 1000;
@@ -95,6 +131,12 @@ const placeBidTransaction = async ({ auctionId, bidderId, amount, io }) => {
     `;
     const bidRes = await client.query(insertBidSql, [auctionId, bidderId, bidAmountNum]);
     const createdBid = bidRes.rows[0];
+
+    // Log accepted bid in bid_logs
+    await client.query(`
+      INSERT INTO bid_logs (auction_id, bidder_id, amount, status, reason)
+      VALUES ($1, $2, $3, 'accepted', 'Bid accepted and confirmed as highest active bid');
+    `, [auctionId, bidderId, bidAmountNum]);
 
     // 6. Update Auction's current_bid and optionally end_time
     if (extended) {
@@ -149,6 +191,27 @@ const placeBidTransaction = async ({ auctionId, bidderId, amount, io }) => {
       });
     }
 
+    // 9. Dispatch notifications (bidder accepted, seller alert, outbid alert)
+    notifyBidPlaced({
+      auctionId,
+      auctionTitle: auction.title,
+      bidderId,
+      bidderName,
+      amount: bidAmountNum,
+      previousHighBidderId,
+      sellerId: auction.seller_id,
+      io,
+    }).catch(console.error);
+
+    if (extended) {
+      query(`SELECT DISTINCT bidder_id FROM bids WHERE auction_id = $1;`, [auctionId])
+        .then(res => {
+          const bidderIds = res.rows.map(r => r.bidder_id);
+          notifyAuctionExtended({ auctionId, auctionTitle: auction.title, bidderIds, io });
+        })
+        .catch(console.error);
+    }
+
     return {
       success: true,
       message: extended 
@@ -197,6 +260,12 @@ const closeExpiredAuctions = async (io) => {
         LIMIT 1;
       `, [auction.id]);
 
+      // Find all unique bidders on this auction for won/lost notifications
+      const allBiddersRes = await client.query(`
+        SELECT DISTINCT bidder_id FROM bids WHERE auction_id = $1;
+      `, [auction.id]);
+      const allBidderIds = allBiddersRes.rows.map(r => r.bidder_id);
+
       if (highestBidRes.rows.length > 0) {
         const winner = highestBidRes.rows[0];
         const finalPrice = parseFloat(winner.amount);
@@ -232,6 +301,18 @@ const closeExpiredAuctions = async (io) => {
             finalPrice,
           });
         }
+
+        // Send notifications
+        notifyAuctionClosed({
+          auctionId: auction.id,
+          auctionTitle: auction.title,
+          winnerId: winner.bidder_id,
+          finalPrice,
+          allBidderIds,
+          sellerId: auction.seller_id,
+          io,
+        }).catch(console.error);
+
       } else {
         // No bids exist on this auction -> Concluded with No Winner
         await client.query(`
@@ -259,6 +340,16 @@ const closeExpiredAuctions = async (io) => {
             hasWinner: false,
           });
         }
+
+        notifyAuctionClosed({
+          auctionId: auction.id,
+          auctionTitle: auction.title,
+          winnerId: null,
+          finalPrice: null,
+          allBidderIds: [],
+          sellerId: auction.seller_id,
+          io,
+        }).catch(console.error);
       }
     }
   } catch (err) {

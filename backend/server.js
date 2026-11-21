@@ -16,6 +16,8 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const auctionRoutes = require('./routes/auctionRoutes');
+const watchlistRoutes = require('./routes/watchlistRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const { getCategories } = require('./controllers/auctionController');
 const setupAuctionSocket = require('./sockets/auctionSocket');
 const { startAuctionBackgroundWorker } = require('./services/auctionEngine');
@@ -116,6 +118,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/auctions', auctionRoutes);
+app.use('/api/watchlist', watchlistRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/categories', getCategories);
 
 // Legacy/Compatibility Public Auctions Endpoint

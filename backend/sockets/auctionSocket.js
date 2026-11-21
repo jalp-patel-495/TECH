@@ -12,6 +12,14 @@ const setupAuctionSocket = (io) => {
     io.emit('viewer_count', { count: activeViewers });
     console.log(`[Socket.IO] Client connected: ${socket.id} (Total: ${activeViewers})`);
 
+    // Join user notification room
+    socket.on('register_user', ({ userId }) => {
+      if (userId) {
+        socket.join(`user_${userId}`);
+        console.log(`[Socket.IO] Client ${socket.id} registered to user_${userId}`);
+      }
+    });
+
     // Join room for a specific auction item
     socket.on('join_auction', ({ auctionId }) => {
       const room = `auction_${auctionId}`;

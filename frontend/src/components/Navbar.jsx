@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
+import NotificationBell from './NotificationBell';
 import { 
   Gavel, 
   User, 
@@ -148,7 +149,9 @@ const Navbar = () => {
             )}
 
             {isAuthenticated ? (
-              <div className="relative">
+              <div className="flex items-center gap-3">
+                <NotificationBell />
+                <div className="relative">
                 <button
                   onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
                   className="flex items-center gap-3 px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-700 hover:border-slate-600 transition-all text-left"
@@ -219,6 +222,7 @@ const Navbar = () => {
                   </div>
                 )}
               </div>
+            </div>
             ) : (
               <div className="flex items-center gap-3">
                 <Link
