@@ -1,0 +1,14 @@
+{
+  "name": "live-auction-platform",
+  "version": "1.0.0",
+  "description": "Professional Live Auction Platform - Full Stack Monorepo",
+  "scripts": {
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "db:init": "cd backend && npm run db:init"
+  },
+  "keywords": ["auction", "realtime", "react", "nodejs", "postgresql", "redis", "socket.io"],
+  "author": "Senior Full-Stack Developer",
+  "license": "ISC"
+}
