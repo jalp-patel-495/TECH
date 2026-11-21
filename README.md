@@ -1,4 +1,4 @@
-﻿# 🏆 LIVEBID Matrix — Enterprise Real-Time Live Auction Platform
+# 🏆 LIVEBID Matrix — Enterprise Real-Time Live Auction Platform
 
 [![Node.js](https://img.shields.io/badge/Node.js-v18+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Express.js](https://img.shields.io/badge/Express.js-4.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
